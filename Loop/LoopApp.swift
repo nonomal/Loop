@@ -105,5 +105,13 @@ struct LoopApp: App {
             view.frame.size = NSSize(width: 26, height: 22)
             button.addSubview(view)
         }
+
+        #if DEBUG
+        WindowGroup {
+            VisualEffectView(material: .popover, blendingMode: .behindWindow)
+                .ignoresSafeArea()
+        }
+        .windowStyle(.hiddenTitleBar)
+        #endif
     }
 }
