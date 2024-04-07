@@ -6,6 +6,7 @@
 //
 
 import SwiftUI
+import Defaults
 
 struct ResizeSelectorRectangle: View {
     let cornerRadius: CGFloat = 5
@@ -41,7 +42,12 @@ struct ResizeSelectorRectangle: View {
                 .padding(3)
                 .position(x: geo.frame(in: .local).midX, y: geo.frame(in: .local).midY)
                 .onChange(of: notchSnapper.mouseEvent) { _ in
-                    guard let screen = NSScreen.screenWithMouse else { return }
+                    guard
+                        let screen = NSScreen.screenWithMouse,
+                        self.notchSnapper.currentAction.direction != self.action.direction
+                    else {
+                        return
+                    }
 
                     var frame = geo.frame(in: .global).flipY(maxY: screen.frame.maxY)
                     frame.origin.x += screen.frame.origin.x
@@ -49,6 +55,13 @@ struct ResizeSelectorRectangle: View {
 
                     if frame.contains(NSEvent.mouseLocation) {
                         Notification.Name.updateUIDirection.post(userInfo: ["action": self.action])
+
+                        if Defaults[.hapticFeedback] {
+                            NSHapticFeedbackManager.defaultPerformer.perform(
+                                NSHapticFeedbackManager.FeedbackPattern.alignment,
+                                performanceTime: NSHapticFeedbackManager.PerformanceTime.now
+                            )
+                        }
 
                         withAnimation(.easeOut(duration: 0.1)) {
                             notchSnapper.currentAction = self.action
