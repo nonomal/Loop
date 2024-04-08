@@ -37,7 +37,7 @@ class MouseTooltipManager {
 
         panel.alphaValue = 0
         panel.backgroundColor = .clear
-        panel.level = NSWindow.Level(NSWindow.Level.screenSaver.rawValue - 1)
+        panel.level = .screenSaver
         panel.contentView = view
         panel.collectionBehavior = .canJoinAllSpaces
         panel.ignoresMouseEvents = true

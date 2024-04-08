@@ -15,6 +15,7 @@ class TooltipManager: ObservableObject {
     private var tooltipManager: MouseTooltipManager?
     private var dynamicNotch: DynamicNotch?
 
+    private var didForceClose: Bool = false // This is auto-reset once the user stops dragging
     private var initialMousePosition: NSPoint?
     private var draggingWindow: Window?
     static var windowOffset: NSRect?
@@ -22,15 +23,13 @@ class TooltipManager: ObservableObject {
     @Published var mouseEvent: NSEvent?
     @Published var currentAction: WindowAction = .init(.noAction)
 
-    init() {}
-
     func start() {
         self.tooltipManager = MouseTooltipManager(tooltipManager: self)
         self.dynamicNotch = DynamicNotch(content: ResizeSelectorView(tooltipManager: self))
 
         self.eventMonitor = NSEventMonitor(
             scope: .all,
-            eventMask: [.leftMouseDragged, .leftMouseUp]
+            eventMask: [.leftMouseDragged, .leftMouseUp, .keyDown]
         ) { event in
             if event.type == .leftMouseDragged {
                 self.leftMouseDragged(event: event)
@@ -39,6 +38,11 @@ class TooltipManager: ObservableObject {
             if event.type == .leftMouseUp {
                 self.leftMouseUp()
             }
+
+            if event.type == .keyDown,
+               event.keyCode == .kVK_Escape {
+                self.close(forceClose: true)
+            }
         }
 
         self.eventMonitor!.start()
@@ -46,7 +50,7 @@ class TooltipManager: ObservableObject {
 
     func leftMouseDragged(event: NSEvent) {
         let configuration = Defaults[.tooltipConfiguration]
-        guard configuration != .off else { return }
+        guard configuration != .off && !self.didForceClose else { return }
 
         self.mouseEvent = event
 
@@ -79,12 +83,13 @@ class TooltipManager: ObservableObject {
                 return
             }
 
-            // If mouse has moved > 10 pixels
-            if initialMousePosition.distanceSquared(to: NSEvent.mouseLocation) > 100 {
+            // If mouse has moved > 50 pixels (2500 cause 50^2)
+            if initialMousePosition.distanceSquared(to: NSEvent.mouseLocation) > 2500 {
                 guard let tooltipManager = self.tooltipManager else {
                     return
                 }
                 tooltipManager.open()
+                self.previewController.open(screen: screen)
             }
 
         } else { // configuration would be .notch
@@ -112,13 +117,17 @@ class TooltipManager: ObservableObject {
         let configuration = Defaults[.tooltipConfiguration]
         guard configuration != .off else { return }
 
-        let shouldResize: Bool = self.tooltipManager?.isVisible ?? false || self.dynamicNotch?.isVisible ?? false
+        let shouldResize =  self.tooltipManager?.isVisible ?? false || self.dynamicNotch?.isVisible ?? false
+        self.close(forceClose: !shouldResize)
+        self.didForceClose = false
+    }
 
+    private func close(forceClose: Bool = false) {
         self.tooltipManager?.close()
         self.dynamicNotch?.hide()
         self.previewController.close()
 
-        if shouldResize, let window = self.draggingWindow, let screen = self.screen {
+        if !forceClose, let window = self.draggingWindow, let screen = self.screen {
             WindowEngine.resize(window, to: self.currentAction, on: screen)
         }
 
@@ -127,5 +136,9 @@ class TooltipManager: ObservableObject {
         self.draggingWindow = nil
         self.initialMousePosition = nil
         TooltipManager.windowOffset = nil
+
+        if forceClose {
+            self.didForceClose = true
+        }
     }
 }
