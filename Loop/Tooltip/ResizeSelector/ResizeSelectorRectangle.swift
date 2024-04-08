@@ -51,7 +51,15 @@ struct ResizeSelectorRectangle: View {
                         return
                     }
 
-                    var frame = geo.frame(in: .global).flipY(maxY: windowHeight)
+                    var frame = geo.frame(in: .global)
+
+                    if Defaults[.tooltipConfiguration] == .onDrag {
+                        frame = frame.flipY(maxY: windowHeight)
+                    } else { // notch
+                        guard let screen = tooltipManager.screen else { return }
+                        frame = frame.flipY(maxY: screen.frame.maxY)
+                    }
+
                     frame.origin.x += offset.minX
                     frame.origin.y += offset.minY
 

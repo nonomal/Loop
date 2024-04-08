@@ -24,6 +24,7 @@ struct GeneralSettingsView: View {
     @Default(.timesLooped) var timesLooped
     @Default(.padding) var padding
     @Default(.windowSnapping) var windowSnapping
+    @Default(.tooltipConfiguration) var tooltipConfiguration
     @Default(.animationConfiguration) var animationConfiguration
     @Default(.restoreWindowFrameOnDrag) var restoreWindowFrameOnDrag
     @Default(.resizeWindowUnderCursor) var resizeWindowUnderCursor
@@ -60,6 +61,12 @@ struct GeneralSettingsView: View {
 
             Section {
                 Toggle("Window snapping", isOn: $windowSnapping)
+
+                Picker("Tooltip", selection: $tooltipConfiguration) {
+                    ForEach(TooltipConfiguration.allCases) { configuration in
+                        Text(configuration.name)
+                    }
+                }
 
                 HStack {
                     Text("Window padding")

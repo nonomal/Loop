@@ -15,9 +15,10 @@ class TooltipManager: ObservableObject {
     private var tooltipManager: MouseTooltipManager?
     private var dynamicNotch: DynamicNotch?
 
-    private var screen: NSScreen?
+    private var initialMousePosition: NSPoint?
     private var draggingWindow: Window?
     static var windowOffset: NSRect?
+    @Published var screen: NSScreen?
     @Published var mouseEvent: NSEvent?
     @Published var currentAction: WindowAction = .init(.noAction)
 
@@ -70,26 +71,37 @@ class TooltipManager: ObservableObject {
         }
 
         if configuration == .onDrag {
-            guard let tooltipManager = self.tooltipManager else {
+            if self.initialMousePosition == nil {
+                self.initialMousePosition = NSEvent.mouseLocation
+            }
+
+            guard let initialMousePosition = self.initialMousePosition else {
                 return
             }
-            tooltipManager.open()
+
+            // If mouse has moved > 10 pixels
+            if initialMousePosition.distanceSquared(to: NSEvent.mouseLocation) > 100 {
+                guard let tooltipManager = self.tooltipManager else {
+                    return
+                }
+                tooltipManager.open()
+            }
 
         } else { // configuration would be .notch
-            guard let dynamicNotch = self.dynamicNotch else {
+            guard self.dynamicNotch != nil else {
                 return
             }
 
-            if dynamicNotch.checkIfMouseIsInNotch() {
+            if self.dynamicNotch!.checkIfMouseIsInNotch() {
                 self.dynamicNotch!.show(on: screen)
                 self.previewController.open(screen: screen)
             }
 
-            if dynamicNotch.isVisible,
+            if self.dynamicNotch!.isVisible,
                let screenWithMouse = NSScreen.screenWithMouse,
                self.screen != screenWithMouse {
 
-                dynamicNotch.hide()
+                self.dynamicNotch?.hide()
                 self.previewController.close()
                 self.currentAction = .init(.noAction)
             }
@@ -113,6 +125,7 @@ class TooltipManager: ObservableObject {
         self.screen = nil
         self.currentAction = .init(.noAction)
         self.draggingWindow = nil
+        self.initialMousePosition = nil
         TooltipManager.windowOffset = nil
     }
 }

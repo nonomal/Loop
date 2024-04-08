@@ -8,7 +8,9 @@
 import SwiftUI
 import Defaults
 
-enum TooltipConfiguration: Int, _DefaultsSerializable {
+enum TooltipConfiguration: Int, _DefaultsSerializable, CaseIterable, Identifiable {
+    var id: Self { return self }
+
     case off = 0
     case notch = 1
     case onDrag = 2
