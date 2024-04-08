@@ -16,7 +16,7 @@ class TooltipManager: ObservableObject {
     private var dynamicNotch: DynamicNotch?
 
     private var didForceClose: Bool = false // This is auto-reset once the user stops dragging
-    private var initialMousePosition: NSPoint?
+    private var initialWindowFrame: CGRect?
     private var draggingWindow: Window?
     static var windowOffset: NSRect?
     @Published var screen: NSScreen?
@@ -68,23 +68,20 @@ class TooltipManager: ObservableObject {
         }
 
         guard
-            self.draggingWindow != nil,
+            let window = self.draggingWindow,
             let screen = self.screen
         else {
             return
         }
 
         if configuration == .onDrag {
-            if self.initialMousePosition == nil {
-                self.initialMousePosition = NSEvent.mouseLocation
+            if self.initialWindowFrame == nil {
+                self.initialWindowFrame = window.frame
             }
 
-            guard let initialMousePosition = self.initialMousePosition else {
-                return
-            }
+            if let initialFrame = self.initialWindowFrame,
+               hasWindowMoved(window.frame, initialFrame) {
 
-            // If mouse has moved > 50 pixels (2500 cause 50^2)
-            if initialMousePosition.distanceSquared(to: NSEvent.mouseLocation) > 2500 {
                 guard let tooltipManager = self.tooltipManager else {
                     return
                 }
@@ -113,6 +110,13 @@ class TooltipManager: ObservableObject {
         }
     }
 
+    private func hasWindowMoved(_ windowFrame: CGRect, _ initialFrame: CGRect) -> Bool {
+        !initialFrame.topLeftPoint.approximatelyEqual(to: windowFrame.topLeftPoint, tolerance: 50) &&
+        !initialFrame.topRightPoint.approximatelyEqual(to: windowFrame.topRightPoint, tolerance: 50) &&
+        !initialFrame.bottomLeftPoint.approximatelyEqual(to: windowFrame.bottomLeftPoint, tolerance: 50) &&
+        !initialFrame.bottomRightPoint.approximatelyEqual(to: windowFrame.bottomRightPoint, tolerance: 50)
+    }
+
     func leftMouseUp() {
         let configuration = Defaults[.tooltipConfiguration]
         guard configuration != .off else { return }
@@ -134,7 +138,7 @@ class TooltipManager: ObservableObject {
         self.screen = nil
         self.currentAction = .init(.noAction)
         self.draggingWindow = nil
-        self.initialMousePosition = nil
+        self.initialWindowFrame = nil
         TooltipManager.windowOffset = nil
 
         if forceClose {
