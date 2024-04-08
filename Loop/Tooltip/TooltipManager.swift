@@ -28,7 +28,7 @@ class TooltipManager: ObservableObject {
         self.dynamicNotch = DynamicNotch(content: ResizeSelectorView(tooltipManager: self))
 
         self.eventMonitor = NSEventMonitor(
-            scope: .all,
+            scope: .global,
             eventMask: [.leftMouseDragged, .leftMouseUp, .keyDown]
         ) { event in
             if event.type == .leftMouseDragged {
