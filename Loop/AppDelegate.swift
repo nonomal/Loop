@@ -13,7 +13,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDele
 
     private let loopManager = LoopManager()
     private let windowDragManager = WindowDragManager()
-    private let notchSnapper = NotchSnapper()
+    private let tooltipManager = TooltipManager()
 
     private var launchedAsLoginItem: Bool {
         guard let event = NSAppleEventManager.shared().currentAppleEvent else { return false }
@@ -34,7 +34,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDele
         IconManager.refreshCurrentAppIcon()
         loopManager.startObservingKeys()
         windowDragManager.addObservers()
-        notchSnapper.start()
+        tooltipManager.start()
 
         if !self.launchedAsLoginItem {
             self.openSettings()

@@ -14,14 +14,16 @@ struct ResizeSelectorRectangle: View {
     let activeColor: NSColor = NSColor.controlBackgroundColor
     let inactiveColor: NSColor = NSColor.controlBackgroundColor
 
-    @ObservedObject var notchSnapper: NotchSnapper
+    @ObservedObject var tooltipManager: TooltipManager
     let action: WindowAction
-    let parentSize: CGSize
+    let sectionSize: CGSize
+    let windowHeight: CGFloat
 
-    init(_ notchSnapper: NotchSnapper, action: WindowAction, parentSize: CGSize) {
-        self.notchSnapper = notchSnapper
+    init(_ tooltipManager: TooltipManager, action: WindowAction, sectionSize: CGSize, windowHeight: CGFloat) {
+        self.tooltipManager = tooltipManager
         self.action = action
-        self.parentSize = parentSize
+        self.sectionSize = sectionSize
+        self.windowHeight = windowHeight
     }
 
     var body: some View {
@@ -29,7 +31,7 @@ struct ResizeSelectorRectangle: View {
             RoundedRectangle(cornerRadius: cornerRadius)
                 .foregroundStyle(
                     Color.secondary.opacity(
-                        self.action.direction == self.notchSnapper.currentAction.direction ? 0.3 : 0.1
+                        self.action.direction == self.tooltipManager.currentAction.direction ? 0.3 : 0.1
                     )
                 )
                 .overlay {
@@ -41,17 +43,17 @@ struct ResizeSelectorRectangle: View {
                 }
                 .padding(3)
                 .position(x: geo.frame(in: .local).midX, y: geo.frame(in: .local).midY)
-                .onChange(of: notchSnapper.mouseEvent) { _ in
+                .onChange(of: tooltipManager.mouseEvent) { _ in
                     guard
-                        let screen = NSScreen.screenWithMouse,
-                        self.notchSnapper.currentAction.direction != self.action.direction
+                        let offset = TooltipManager.windowOffset,
+                        self.tooltipManager.currentAction.direction != self.action.direction
                     else {
                         return
                     }
 
-                    var frame = geo.frame(in: .global).flipY(maxY: screen.frame.maxY)
-                    frame.origin.x += screen.frame.origin.x
-                    frame.origin.y += screen.frame.origin.y
+                    var frame = geo.frame(in: .global).flipY(maxY: windowHeight)
+                    frame.origin.x += offset.minX
+                    frame.origin.y += offset.minY
 
                     if frame.contains(NSEvent.mouseLocation) {
                         Notification.Name.updateUIDirection.post(userInfo: ["action": self.action])
@@ -64,14 +66,14 @@ struct ResizeSelectorRectangle: View {
                         }
 
                         withAnimation(.easeOut(duration: 0.1)) {
-                            notchSnapper.currentAction = self.action
+                            tooltipManager.currentAction = self.action
                         }
                     }
                 }
         }
         .frame(
-            width: parentSize.width * (self.action.direction.frameMultiplyValues?.width ?? .zero),
-            height: parentSize.height * (self.action.direction.frameMultiplyValues?.height ?? .zero)
+            width: sectionSize.width * (self.action.direction.frameMultiplyValues?.width ?? .zero),
+            height: sectionSize.height * (self.action.direction.frameMultiplyValues?.height ?? .zero)
         )
     }
 }

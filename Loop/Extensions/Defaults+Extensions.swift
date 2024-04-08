@@ -16,7 +16,8 @@ extension Defaults.Keys {
     static let currentIcon = Key<String>("currentIcon", default: "AppIcon-Classic")
     static let notificationWhenIconUnlocked = Key<Bool>("notificationWhenIconUnlocked", default: true)
     static let timesLooped = Key<Int>("timesLooped", default: 0)
-    static let windowSnapping = Key<Bool>("windowSnapping", default: false) // BETA
+    static let windowSnapping = Key<Bool>("windowSnapping", default: false)
+    static let tooltipConfiguration = Key<TooltipConfiguration>("tooltipConfiguration", default: .off)
     static let animateWindowResizes = Key<Bool>("animateWindowResizes", default: false) // BETA
     static let padding = Key<PaddingModel>("padding", default: .zero)
     static let restoreWindowFrameOnDrag = Key<Bool>("restoreWindowFrameOnDrag", default: false)
