@@ -5,11 +5,10 @@
 //  Created by Kai Azim on 2023-09-04.
 //
 
-import Cocoa
 import Defaults
+import SwiftUI
 
 class WindowDragManager {
-
     private var draggingWindow: Window?
     private var initialWindowFrame: CGRect?
     private var direction: WindowDirection = .noAction
@@ -20,7 +19,7 @@ class WindowDragManager {
     private var leftMouseUpMonitor: EventMonitor?
 
     func addObservers() {
-        self.leftMouseDraggedMonitor = NSEventMonitor(scope: .global, eventMask: .leftMouseDragged) { _ in
+        leftMouseDraggedMonitor = NSEventMonitor(scope: .global, eventMask: .leftMouseDragged) { _ in
             // Process window (only ONCE during a window drag)
             if self.draggingWindow == nil {
                 self.setCurrentDraggingWindow()
@@ -29,8 +28,6 @@ class WindowDragManager {
             if let window = self.draggingWindow,
                let initialFrame = self.initialWindowFrame,
                self.hasWindowMoved(window.frame, initialFrame) {
-                // If window is not at initial position...
-
                 if Defaults[.restoreWindowFrameOnDrag] {
                     self.restoreInitialWindowSize(window)
                 } else {
@@ -38,17 +35,25 @@ class WindowDragManager {
                 }
 
                 if Defaults[.windowSnapping] {
+                    if let frame = NSScreen.main?.displayBounds,
+                       let mouseLocation = CGEvent.mouseLocation {
+                        if mouseLocation.y == frame.minY {
+                            let newOrigin = CGPoint(x: mouseLocation.x, y: frame.minY + 1)
+                            CGWarpMouseCursorPosition(newOrigin)
+                        }
+                    }
+
                     self.getWindowSnapDirection()
                 }
             }
+
+            return nil
         }
 
-        self.leftMouseUpMonitor = NSEventMonitor(scope: .global, eventMask: .leftMouseUp) { _ in
+        leftMouseUpMonitor = NSEventMonitor(scope: .global, eventMask: .leftMouseUp) { _ in
             if let window = self.draggingWindow,
                let initialFrame = self.initialWindowFrame,
                self.hasWindowMoved(window.frame, initialFrame) {
-                // If window is not at initial position...
-
                 if Defaults[.windowSnapping] {
                     self.attemptWindowSnap(window)
                 }
@@ -56,6 +61,8 @@ class WindowDragManager {
 
             self.previewController.close()
             self.draggingWindow = nil
+
+            return nil
         }
 
         leftMouseDraggedMonitor!.start()
@@ -63,23 +70,28 @@ class WindowDragManager {
     }
 
     private func setCurrentDraggingWindow() {
-        guard
-            let mousePosition = NSEvent.mouseLocation.flipY,
-            let draggingWindow = WindowEngine.windowAtPosition(mousePosition),
-            !draggingWindow.isAppExcluded
-        else {
-            return
-        }
+        let mousePosition = NSEvent.mouseLocation.flipY(screen: NSScreen.screens[0])
 
-        self.draggingWindow = draggingWindow
-        self.initialWindowFrame = draggingWindow.frame
+        do {
+            guard
+                let draggingWindow = try WindowEngine.windowAtPosition(mousePosition),
+                !draggingWindow.isAppExcluded
+            else {
+                return
+            }
+
+            self.draggingWindow = draggingWindow
+            initialWindowFrame = draggingWindow.frame
+        } catch {
+            // print("Failed to get window at position: \(error.localizedDescription)")
+        }
     }
 
     private func hasWindowMoved(_ windowFrame: CGRect, _ initialFrame: CGRect) -> Bool {
         !initialFrame.topLeftPoint.approximatelyEqual(to: windowFrame.topLeftPoint) &&
-        !initialFrame.topRightPoint.approximatelyEqual(to: windowFrame.topRightPoint) &&
-        !initialFrame.bottomLeftPoint.approximatelyEqual(to: windowFrame.bottomLeftPoint) &&
-        !initialFrame.bottomRightPoint.approximatelyEqual(to: windowFrame.bottomRightPoint)
+            !initialFrame.topRightPoint.approximatelyEqual(to: windowFrame.topRightPoint) &&
+            !initialFrame.bottomLeftPoint.approximatelyEqual(to: windowFrame.bottomLeftPoint) &&
+            !initialFrame.bottomRightPoint.approximatelyEqual(to: windowFrame.bottomRightPoint)
     }
 
     private func restoreInitialWindowSize(_ window: Window) {
@@ -92,10 +104,10 @@ class WindowDragManager {
         if let screen = NSScreen.screenWithMouse {
             var newWindowFrame = window.frame
             newWindowFrame.size = initialFrame.size
-            newWindowFrame = newWindowFrame.pushBottomRightPointInside(screen.frame)
+            newWindowFrame = newWindowFrame.pushInside(screen.frame)
             window.setFrame(newWindowFrame)
         } else {
-            window.setSize(initialFrame.size)
+            window.size = initialFrame.size
         }
 
         // If the window doesn't contain the cursor, keep the original maxX
@@ -116,30 +128,39 @@ class WindowDragManager {
     }
 
     private func getWindowSnapDirection() {
-        guard
-            let mousePosition = NSEvent.mouseLocation.flipY,
-            let screen = NSScreen.screenWithMouse,
-            let screenFrame = screen.visibleFrame.flipY
-        else {
+        guard let screen = NSScreen.screenWithMouse else {
             return
         }
 
-        self.previewController.setScreen(to: screen)
-        let ignoredFrame = screenFrame.insetBy(dx: 20, dy: 20)  // 10px of snap area on each side
+        let mainScreen = NSScreen.screens[0]
+        let mousePosition = NSEvent.mouseLocation.flipY(screen: mainScreen)
+        let screenFrame = screen.frame.flipY(screen: mainScreen)
 
-        let oldDirection = self.direction
+        previewController.setScreen(to: screen)
+
+        let inset = Defaults[.snapThreshold]
+        let topInset = max(screen.menubarHeight / 2, inset)
+        var ignoredFrame = screenFrame
+
+        ignoredFrame.origin.x += inset
+        ignoredFrame.size.width -= inset * 2
+        ignoredFrame.origin.y += topInset
+        ignoredFrame.size.height -= inset + topInset
+
+        let oldDirection = direction
 
         if !ignoredFrame.contains(mousePosition) {
-            self.direction = WindowDirection.processSnap(
+            direction = WindowDirection.processSnap(
                 mouseLocation: mousePosition,
-                currentDirection: self.direction,
+                currentDirection: direction,
                 screenFrame: screenFrame,
                 ignoredFrame: ignoredFrame
             )
 
             print("Window snapping direction changed: \(direction)")
 
-            self.previewController.open(screen: screen, window: nil)
+            previewController.open(screen: screen, window: nil)
+
             DispatchQueue.main.async {
                 NotificationCenter.default.post(
                     name: Notification.Name.updateUIDirection,
@@ -148,11 +169,11 @@ class WindowDragManager {
                 )
             }
         } else {
-            self.direction = .noAction
-            self.previewController.close()
+            direction = .noAction
+            previewController.close()
         }
 
-        if self.direction != oldDirection {
+        if direction != oldDirection {
             if Defaults[.hapticFeedback] {
                 NSHapticFeedbackManager.defaultPerformer.perform(
                     NSHapticFeedbackManager.FeedbackPattern.alignment,
@@ -163,9 +184,7 @@ class WindowDragManager {
     }
 
     private func attemptWindowSnap(_ window: Window) {
-        guard
-            let screen = NSScreen.screenWithMouse
-        else {
+        guard let screen = NSScreen.screenWithMouse else {
             return
         }
 

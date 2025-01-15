@@ -8,27 +8,28 @@
 import SwiftUI
 
 struct DirectionSelectorCircleSegment: Shape {
-
     var angle: Double = .zero
     let radialMenuSize: CGFloat
 
     var animatableData: Double {
-        get { self.angle }
-        set { self.angle = newValue }
+        get { angle }
+        set { angle = newValue }
     }
 
-    func path(in rect: CGRect) -> Path {
+    func path(in _: CGRect) -> Path {
         var path = Path()
 
-        path.move(to:
-                    CGPoint(
-                        x: radialMenuSize/2,
-                        y: radialMenuSize/2
-                    )
+        path.move(
+            to: CGPoint(
+                x: radialMenuSize / 2,
+                y: radialMenuSize / 2
+            )
         )
         path.addArc(
-            center: CGPoint(x: radialMenuSize/2,
-                            y: radialMenuSize/2),
+            center: CGPoint(
+                x: radialMenuSize / 2,
+                y: radialMenuSize / 2
+            ),
             radius: radialMenuSize,
             startAngle: .degrees(angle - 22.5),
             endAngle: .degrees(angle + 22.5),

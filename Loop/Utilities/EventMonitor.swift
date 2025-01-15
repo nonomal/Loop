@@ -14,12 +14,13 @@ protocol EventMonitor {
 }
 
 class NSEventMonitor: EventMonitor, Identifiable, Equatable {
-    private weak var localEventMonitor: AnyObject?
-    private weak var globalEventMonitor: AnyObject?
+    private var localEventMonitor: Any?
+    private var globalEventMonitor: Any?
 
-    private var scope: NSEventMonitor.Scope
-    private var eventTypeMask: NSEvent.EventTypeMask
-    private var eventHandler: (NSEvent) -> Void
+    private let scope: NSEventMonitor.Scope
+    private let eventTypeMask: NSEvent.EventTypeMask
+    private let eventHandler: (NSEvent) -> (NSEvent?)
+
     var isEnabled: Bool = false
 
     enum Scope {
@@ -29,50 +30,59 @@ class NSEventMonitor: EventMonitor, Identifiable, Equatable {
     }
 
     deinit {
-        stop()
+        if isEnabled {
+            stop()
+        }
+
+        // Clear references
+        localEventMonitor = nil
+        globalEventMonitor = nil
     }
 
-    init(scope: Scope, eventMask: NSEvent.EventTypeMask, handler: @escaping (NSEvent) -> Void) {
+    init(scope: Scope, eventMask: NSEvent.EventTypeMask, handler: @escaping (NSEvent) -> (NSEvent?)) {
         self.eventTypeMask = eventMask
         self.eventHandler = handler
         self.scope = scope
     }
 
-    public func start() {
-        if self.scope == .local || self.scope == .all {
-            self.localEventMonitor = NSEvent.addLocalMonitorForEvents(
-                matching: eventTypeMask
-            ) { event in
-                self.eventHandler(event)
-                return nil
-            } as AnyObject
-
-            self.isEnabled = true
-        }
-
-        if self.scope == .global || self.scope == .all {
-            self.globalEventMonitor = NSEvent.addGlobalMonitorForEvents(
+    func start() {
+        if scope == .local || scope == .all {
+            localEventMonitor = NSEvent.addLocalMonitorForEvents(
                 matching: eventTypeMask,
-                handler: eventHandler
-            ) as AnyObject
-
-            self.isEnabled = true
+                handler: { [weak self] event in
+                    self?.eventHandler(event)
+                }
+            )
         }
+
+        if scope == .global || scope == .all {
+            globalEventMonitor = NSEvent.addGlobalMonitorForEvents(
+                matching: eventTypeMask,
+                handler: { [weak self] event in
+                    _ = self?.eventHandler(event)
+                }
+            )
+        }
+
+        isEnabled = true
     }
 
-    public func stop() {
+    func stop() {
+        guard isEnabled else { return }
+
         if let localEventMonitor {
             NSEvent.removeMonitor(localEventMonitor)
-            self.isEnabled = false
+            self.localEventMonitor = nil
         }
 
         if let globalEventMonitor {
             NSEvent.removeMonitor(globalEventMonitor)
-            self.isEnabled = false
+            self.globalEventMonitor = nil
         }
+        isEnabled = false
     }
 
-    var id = UUID()
+    let id = UUID()
     static func == (lhs: NSEventMonitor, rhs: NSEventMonitor) -> Bool {
         lhs.id == rhs.id
     }
@@ -99,9 +109,9 @@ class CGEventMonitor: EventMonitor, Identifiable, Equatable {
             userInfo: Unmanaged.passRetained(self).toOpaque()
         )
 
-        if let eventTap = self.eventTap {
+        if let eventTap {
             self.runLoopSource = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, eventTap, 0)
-            if let runLoopSource = self.runLoopSource {
+            if let runLoopSource {
                 CFRunLoopAddSource(CFRunLoopGetCurrent(), runLoopSource, .commonModes)
             }
         } else {
@@ -110,25 +120,37 @@ class CGEventMonitor: EventMonitor, Identifiable, Equatable {
     }
 
     deinit {
-        stop()
+        if isEnabled {
+            stop()
+        }
+
+        // Clean up run loop source and event tap
+        if let runLoopSource {
+            CFRunLoopRemoveSource(CFRunLoopGetCurrent(), runLoopSource, .commonModes)
+            self.runLoopSource = nil
+        }
+
+        if eventTap != nil {
+            self.eventTap = nil
+        }
     }
 
     private func handleEvent(event: CGEvent) -> Unmanaged<CGEvent>? {
-        return self.eventCallback(event)
+        eventCallback(event)
     }
 
     func start() {
-        if let eventTap = self.eventTap {
-            CGEvent.tapEnable(tap: eventTap, enable: true)
-        }
-        self.isEnabled = true
+        guard let eventTap else { return }
+        CGEvent.tapEnable(tap: eventTap, enable: true)
+        isEnabled = true
     }
 
     func stop() {
-        if let eventTap = self.eventTap {
-            CGEvent.tapEnable(tap: eventTap, enable: false)
-        }
-        self.isEnabled = false
+        guard isEnabled else { return }
+
+        guard let eventTap else { return }
+        CGEvent.tapEnable(tap: eventTap, enable: false)
+        isEnabled = false
     }
 
     var id = UUID()

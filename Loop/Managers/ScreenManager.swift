@@ -9,12 +9,12 @@ import SwiftUI
 
 class ScreenManager {
     static func screenContaining(_ window: Window) -> NSScreen? {
-        let screens = self.getScreensInOrder()
-        return self.screenContaining(window, in: screens)
+        let screens = getScreensInOrder()
+        return screenContaining(window, in: screens)
     }
 
     static func nextScreen(from screen: NSScreen, canRestartCycle: Bool = true) -> NSScreen? {
-        let screens = self.getScreensInOrder()
+        let screens = getScreensInOrder()
         if let nextScreen = screens.next(from: screen) {
             return nextScreen
         }
@@ -22,7 +22,7 @@ class ScreenManager {
     }
 
     static func previousScreen(from screen: NSScreen, canRestartCycle: Bool = true) -> NSScreen? {
-        let screens = self.getScreensInOrder()
+        let screens = getScreensInOrder()
         if let previousScreen = screens.previous(from: screen) {
             return previousScreen
         }
@@ -40,7 +40,7 @@ class ScreenManager {
             return firstScreen
         }
 
-        guard let currentScreen = self.findScreen(with: window, screens) else {
+        guard let currentScreen = findScreen(with: window, screens) else {
             return firstScreen
         }
 
@@ -49,8 +49,12 @@ class ScreenManager {
 
     private static func getScreensInOrder() -> [NSScreen] {
         NSScreen.screens
-            .sorted(by: { $0.frame.origin.y < $1.frame.origin.y })
-            .sorted(by: { $0.frame.origin.x < $1.frame.origin.x })
+            .sorted {
+                $0.frame.origin.y < $1.frame.origin.y
+            }
+            .sorted {
+                $0.frame.origin.x < $1.frame.origin.x
+            }
     }
 
     private static func findScreen(with window: Window, _ screens: [NSScreen]) -> NSScreen? {
@@ -82,11 +86,11 @@ class ScreenManager {
 
 extension Array where Element: Hashable {
     func next(from item: Element) -> Element? {
-        guard let index = self.firstIndex(of: item) else {
+        guard let index = firstIndex(of: item) else {
             return nil
         }
 
-        if index + 1 < self.count {
+        if index + 1 < count {
             return self[index + 1]
         }
 
@@ -94,7 +98,7 @@ extension Array where Element: Hashable {
     }
 
     func previous(from item: Element) -> Element? {
-        guard let index = self.firstIndex(of: item) else {
+        guard let index = firstIndex(of: item) else {
             return nil
         }
 

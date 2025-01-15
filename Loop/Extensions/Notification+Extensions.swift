@@ -12,11 +12,16 @@ extension Notification.Name {
     static let updateUIDirection = Notification.Name("updateUIDirection")
 
     static let forceCloseLoop = Notification.Name("forceCloseLoop")
-    static let didLoop = Notification.Name("didLoop")
+    static let activeStateChanged = Notification.Name("activeStateChanged")
+
+    static let systemWindowManagerStateChanged = Notification.Name("systemWindowManagerStateChanged")
+
+    static let didImportKeybindsSuccessfully = Notification.Name("didImportKeybindsSuccessfully")
+    static let didExportKeybindsSuccessfully = Notification.Name("didExportKeybindsSuccessfully")
 
     @discardableResult
-    func onReceive(object: Any? = nil, using: @escaping (Notification) -> Void) -> NSObjectProtocol {
-        return NotificationCenter.default.addObserver(
+    func onReceive(object: Any? = nil, using: @escaping (Notification) -> ()) -> NSObjectProtocol {
+        NotificationCenter.default.addObserver(
             forName: self,
             object: object,
             queue: .main,

@@ -13,19 +13,12 @@ enum CustomWindowActionUnit: Int, Codable, CaseIterable, Identifiable {
     case pixels = 0
     case percentage = 1
 
-    var label: Text {
+    var suffix: String {
         switch self {
         case .pixels:
-            Text("\(Image(systemName: "rectangle.checkered")) Pixels")
+            .init(localized: "Measurement unit: pixels", defaultValue: "px")
         case .percentage:
-            Text("\(Image(systemName: "percent")) Percentages")
-        }
-    }
-
-    var postscript: String {
-        switch self {
-        case .pixels: "px"
-        case .percentage: "%"
+            .init(localized: "Measurement unit: percentage", defaultValue: "%")
         }
     }
 }

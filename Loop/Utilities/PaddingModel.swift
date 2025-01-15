@@ -5,10 +5,10 @@
 //  Created by Kai Azim on 2024-02-01.
 //
 
-import SwiftUI
 import Defaults
+import SwiftUI
 
-struct PaddingModel: Codable, Defaults.Serializable {
+struct PaddingModel: Codable, Defaults.Serializable, Hashable {
     var window: CGFloat
     var externalBar: CGFloat
     var top: CGFloat
@@ -19,7 +19,7 @@ struct PaddingModel: Codable, Defaults.Serializable {
     var configureScreenPadding: Bool
 
     var totalTopPadding: CGFloat {
-        self.top + externalBar
+        top + externalBar
     }
 
     static var zero = PaddingModel(
@@ -32,11 +32,15 @@ struct PaddingModel: Codable, Defaults.Serializable {
         configureScreenPadding: false
     )
 
-    var totalVerticalPadding: CGFloat {
-        self.totalTopPadding + self.bottom
+    var allEqual: Bool {
+        window == top && window == bottom && window == right && window == left
     }
 
-    var totalHorizontalPadding: CGFloat {
-        self.right + self.left
+    func apply(on initial: CGRect) -> CGRect {
+        initial
+            .padding(.leading, left)
+            .padding(.trailing, right)
+            .padding(.bottom, bottom)
+            .padding(.top, totalTopPadding)
     }
 }

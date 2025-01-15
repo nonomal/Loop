@@ -10,7 +10,8 @@ Loop.app
 *.mode2v3
 *.perspectivev3
 *.xcuserstate
-project.xcworkspace
 xcuserdata
+project.xcworkspace
 Loop.zip
 Build/
+DerivedData

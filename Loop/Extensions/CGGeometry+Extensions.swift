@@ -1,5 +1,5 @@
 //
-//  CGPoint+Extensions.swift
+//  CGGeometry+Extensions.swift
 //  Loop
 //
 //  Created by Kai Azim on 2023-06-14.
@@ -9,7 +9,7 @@ import SwiftUI
 
 extension CGFloat {
     func approximatelyEquals(to comparison: CGFloat, tolerance: CGFloat = 10) -> Bool {
-        return abs(self - comparison) < tolerance
+        abs(self - comparison) < tolerance
     }
 }
 
@@ -30,43 +30,55 @@ extension CGPoint {
             * (from.y - comparisonPoint.y)
     }
 
-    var flipY: CGPoint? {
-        guard let screen = NSScreen.screenWithMouse else { return nil }
-        return CGPoint(x: self.x, y: screen.frame.maxY - self.y)
+    func flipY(maxY: CGFloat) -> CGPoint {
+        CGPoint(x: x, y: maxY - y)
+    }
+
+    func flipY(screen: NSScreen) -> CGPoint {
+        flipY(maxY: screen.frame.maxY)
     }
 
     func approximatelyEqual(to point: CGPoint, tolerance: CGFloat = 10) -> Bool {
         abs(x - point.x) < tolerance &&
-        abs(y - point.y) < tolerance
+            abs(y - point.y) < tolerance
     }
 }
 
 extension CGSize {
     var area: CGFloat {
-        self.width * self.height
+        width * height
     }
 
     func approximatelyEqual(to size: CGSize, tolerance: CGFloat = 10) -> Bool {
-        return abs(width - size.width) < tolerance && abs(height - size.height) < tolerance
+        abs(width - size.width) < tolerance && abs(height - size.height) < tolerance
+    }
+
+    func center(inside parentRect: CGRect) -> CGRect {
+        let parentRectCenter = parentRect.center
+        let newX = parentRectCenter.x - width / 2
+        let newY = parentRectCenter.y - height / 2
+
+        return CGRect(
+            x: newX,
+            y: newY,
+            width: width,
+            height: height
+        )
     }
 }
 
 extension CGRect {
-    var flipY: CGRect? {
-        guard let screen = NSScreen.screenWithMouse else { return nil }
-        return CGRect(
-            x: self.minX,
-            y: screen.frame.maxY - self.maxY,
-            width: self.width,
-            height: self.height)
+    func flipY(screen: NSScreen) -> CGRect {
+        flipY(maxY: screen.frame.maxY)
     }
 
     func flipY(maxY: CGFloat) -> CGRect {
-        return CGRect(
-            x: self.minX,
+        CGRect(
+            x: minX,
             y: maxY - self.maxY,
-            width: self.width,
-            height: self.height)
+            width: width,
+            height: height
+        )
     }
 
     func padding(_ sides: Edge.Set, _ amount: CGFloat) -> CGRect {
@@ -94,14 +106,22 @@ extension CGRect {
     }
 
     func approximatelyEqual(to rect: CGRect, tolerance: CGFloat = 10) -> Bool {
-        return abs(origin.x - rect.origin.x) < tolerance &&
-                abs(origin.y - rect.origin.y) < tolerance &&
-                abs(width - rect.width) < tolerance &&
-                abs(height - rect.height) < tolerance
+        abs(origin.x - rect.origin.x) < tolerance &&
+            abs(origin.y - rect.origin.y) < tolerance &&
+            abs(width - rect.width) < tolerance &&
+            abs(height - rect.height) < tolerance
     }
 
-    func pushBottomRightPointInside(_ rect2: CGRect) -> CGRect {
+    func pushInside(_ rect2: CGRect) -> CGRect {
         var result = self
+
+        if result.minX < rect2.minX {
+            result.origin.x = rect2.minX
+        }
+
+        if result.minY < rect2.minY {
+            result.origin.y = rect2.minY
+        }
 
         if result.maxX > rect2.maxX {
             result.origin.x = rect2.maxX - result.width
@@ -115,33 +135,33 @@ extension CGRect {
     }
 
     var topLeftPoint: CGPoint {
-        CGPoint(x: self.minX, y: self.minY)
+        CGPoint(x: minX, y: minY)
     }
 
     var topRightPoint: CGPoint {
-        CGPoint(x: self.maxX, y: self.minY)
+        CGPoint(x: maxX, y: minY)
     }
 
     var bottomLeftPoint: CGPoint {
-        CGPoint(x: self.minX, y: self.maxY)
+        CGPoint(x: minX, y: maxY)
     }
 
     var bottomRightPoint: CGPoint {
-        CGPoint(x: self.maxX, y: self.maxY)
+        CGPoint(x: maxX, y: maxY)
     }
 
     var center: CGPoint {
-        CGPoint(x: self.midX, y: self.midY)
+        CGPoint(x: midX, y: midY)
     }
 
     func inset(by amount: CGFloat, minSize: CGSize) -> CGRect {
         // Respect minimum width and height
-        let insettedWidth = max(minSize.width, self.width - 2 * amount)
-        let insettedHeight = max(minSize.height, self.height - 2 * amount)
+        let insettedWidth = max(minSize.width, width - 2 * amount)
+        let insettedHeight = max(minSize.height, height - 2 * amount)
 
         // Calculate the new inset rectangle
-        let newX = self.midX - insettedWidth / 2
-        let newY = self.midY - insettedHeight / 2
+        let newX = midX - insettedWidth / 2
+        let newY = midY - insettedHeight / 2
 
         return CGRect(
             x: newX,
@@ -154,19 +174,19 @@ extension CGRect {
     func getEdgesTouchingBounds(_ rect2: CGRect) -> Edge.Set {
         var result: Edge.Set = []
 
-        if self.minX.approximatelyEquals(to: rect2.minX) {
+        if minX.approximatelyEquals(to: rect2.minX) {
             result.insert(.leading)
         }
 
-        if self.minY.approximatelyEquals(to: rect2.minY) {
+        if minY.approximatelyEquals(to: rect2.minY) {
             result.insert(.top)
         }
 
-        if self.maxX.approximatelyEquals(to: rect2.maxX) {
+        if maxX.approximatelyEquals(to: rect2.maxX) {
             result.insert(.trailing)
         }
 
-        if self.maxY.approximatelyEquals(to: rect2.maxY) {
+        if maxY.approximatelyEquals(to: rect2.maxY) {
             result.insert(.bottom)
         }
 

@@ -1,7 +1,7 @@
 name: Feature Request
 description: Request a new feature.
 title: "✨ [Title here]"
-labels: ["feature"]
+labels: ["Feature"]
 body:
   - type: textarea
     attributes:
@@ -28,10 +28,14 @@ body:
     attributes:
       label: Final Checks
       options:
+        - label: My issue is written in English
+          required: true
         - label: My issue title is descriptive
           required: true
         - label: This is a single feature request (multiple feature requests should be reported individually)
           required: true
+        - label: I can help with the improvement or development of this feature (tick if you can help)
+          required: false
 
   - type: markdown
     attributes:

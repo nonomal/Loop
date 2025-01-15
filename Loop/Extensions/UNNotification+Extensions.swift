@@ -24,14 +24,14 @@ extension UNNotificationAttachment {
             try fileManager.createDirectory(at: tmpSubFolderURL!, withIntermediateDirectories: true, attributes: nil)
             let fileURL = tmpSubFolderURL?.appendingPathComponent(imageFileIdentifier)
             try imgData.write(to: fileURL!, options: [])
-            let imageAttachment = try UNNotificationAttachment.init(
+            let imageAttachment = try UNNotificationAttachment(
                 identifier: imageFileIdentifier,
                 url: fileURL!,
                 options: nil
             )
             return imageAttachment
-        } catch let error {
-            print("error \(error)")
+        } catch {
+            print("error \(error.localizedDescription)")
         }
 
         return nil

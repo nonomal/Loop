@@ -5,21 +5,21 @@
 //  Created by Kai Azim on 2023-06-16.
 //
 
-import SwiftUI
 import Defaults
+import SwiftUI
 
-struct WindowEngine {
-
+enum WindowEngine {
     /// Resize a Window
     /// - Parameters:
     ///   - window: Window to be resized
     ///   - direction: WindowDirection
     ///   - screen: Screen the window should be resized on
+    ///   - shouldRecord: only set to false when preview window is disabled (so live preview)
     static func resize(
         _ window: Window,
         to action: WindowAction,
         on screen: NSScreen,
-        suppressAnimations: Bool = false
+        shouldRecord: Bool = true
     ) {
         guard action.direction != .noAction else { return }
         let willChangeScreens = ScreenManager.screenContaining(window) != screen
@@ -32,17 +32,7 @@ struct WindowEngine {
             window.activate()
         }
 
-        if !WindowRecords.hasBeenRecorded(window) {
-            WindowRecords.recordFirst(for: window)
-        }
-
-        if action.direction == .fullscreen {
-            window.toggleFullscreen()
-            WindowRecords.record(window, action)
-            return
-        }
-        window.setFullscreen(false)
-
+        // If the action is to hide or minimize, perform the action then return
         if action.direction == .hide {
             window.toggleHidden()
             return
@@ -53,64 +43,109 @@ struct WindowEngine {
             return
         }
 
-        var targetWindowFrame = action.getFrame(window: window, bounds: screen.safeScreenFrame)
+        if shouldRecord {
+            WindowRecords.record(window, action)
+        }
 
+        if #available(macOS 15, *), Defaults[.useSystemWindowManagerWhenAvailable], !willChangeScreens {
+            SystemWindowManager.MoveAndResize.syncPadding()
+
+            // System resizes seem to only be able to be performed on the frontmost app
+            if let systemAction = action.direction.systemEquivalent, let app = window.nsRunningApplication,
+               app == NSWorkspace.shared.frontmostApplication, let axMenuItem = try? systemAction.getItem(for: app) {
+                try? axMenuItem.performAction(.press)
+                return
+            } else {
+                print("System action not available for \(action.direction)")
+            }
+        }
+
+        // If the action is fullscreen, toggle fullscreen then return
+        if action.direction == .fullscreen {
+            window.toggleFullscreen()
+            return
+        }
+
+        // Otherwise, we obviously need to disable fullscreen to resize the window
+        window.fullscreen = false
+
+        // Calculate the target frame
+        let targetFrame = action.getFrame(window: window, bounds: screen.safeScreenFrame, screen: screen)
+        print("Target window frame: \(targetFrame)")
+
+        // If the action is undo, remove the last action from the window, as the target frame already contains the last action's size
         if action.direction == .undo {
             WindowRecords.removeLastAction(for: window)
         }
 
-        print("Target window frame: \(targetWindowFrame)")
+        let animate = shouldAnimateResize(for: window)
 
-        let enhancedUI = window.enhancedUserInterface ?? false
-        var animate = (!suppressAnimations && Defaults[.animateWindowResizes] && !enhancedUI)
-        if animate {
-            if PermissionsManager.ScreenRecording.getStatus() == false {
-                PermissionsManager.ScreenRecording.requestAccess()
-                animate = false
-                return
+        // If the window is one of Loop's windows, resize it using the actual NSWindow, preventing crashes
+        if window.nsRunningApplication?.bundleIdentifier == Bundle.main.bundleIdentifier,
+           let window = NSApp.keyWindow ?? NSApp.windows.first(where: { $0.level.rawValue <= NSWindow.Level.floating.rawValue }) {
+            NSAnimationContext.runAnimationGroup { context in
+                context.timingFunction = CAMediaTimingFunction(controlPoints: 0.33, 1, 0.68, 1)
+                window.animator().setFrame(targetFrame.flipY(screen: .screens[0]), display: false)
             }
+            return
+        }
 
-            // Calculate the window's minimum window size and change the target accordingly
-            window.getMinSize(screen: screen) { minSize in
-                let nsScreenFrame = screen.safeScreenFrame.flipY!
+        let usePadding = Defaults[.enablePadding] && (Defaults[.paddingMinimumScreenSize] == 0 || screen.diagonalSize > Defaults[.paddingMinimumScreenSize])
 
-                if (targetWindowFrame.minX + minSize.width) > nsScreenFrame.maxX {
-                    targetWindowFrame.origin.x = nsScreenFrame.maxX - minSize.width - Defaults[.padding].right
-                }
-
-                if (targetWindowFrame.minY + minSize.height) > nsScreenFrame.maxY {
-                    targetWindowFrame.origin.y = nsScreenFrame.maxY - minSize.height - Defaults[.padding].bottom
-                }
-
-                window.setFrame(targetWindowFrame, animate: true) {
-                    WindowRecords.record(window, action)
-                }
-            }
+        // If the window is being moved via shortcuts (move right, move left etc.), then the bounds will be zero.
+        // This is because the window *can* be moved off-screen in this case.
+        // Otherwise padding will be applied if needed.
+        let bounds = if action.direction.willMove {
+            CGRect.zero
+        } else if usePadding {
+            Defaults[.padding].apply(on: screen.safeScreenFrame)
         } else {
-            window.setFrame(targetWindowFrame, sizeFirst: willChangeScreens) {
-                // Fixes an issue where window isn't resized correctly on multi-monitor setups
-                if !window.frame.approximatelyEqual(to: targetWindowFrame) {
-                    print("Backup resizing...")
-                    window.setFrame(targetWindowFrame)
-                }
+            screen.safeScreenFrame
+        }
 
-                WindowEngine.handleSizeConstrainedWindow(window: window, screenFrame: screen.safeScreenFrame)
-                WindowRecords.record(window, action)
+        window.setFrame(
+            targetFrame,
+            animate: animate,
+            sizeFirst: willChangeScreens,
+            bounds: bounds
+        ) {
+            // Fixes an issue where window isn't resized correctly on multi-monitor setups
+            // If window is being animated, then the size is very likely to already be correct, as what's really happening is window.setFrame at a really high rate.
+            if !animate, !window.frame.approximatelyEqual(to: targetFrame) {
+                window.setFrame(targetFrame)
             }
+
+            // If window's minimum size exceeds the screen bounds, push it back in
+            WindowEngine.handleSizeConstrainedWindow(window: window, bounds: bounds)
+        }
+
+        // Move cursor to center of window if user has enabled it
+        if Defaults[.moveCursorWithWindow] {
+            CGWarpMouseCursorPosition(targetFrame.center)
         }
     }
 
+    /// Get the target window, depending on the user's preferences. This could be the frontmost window, or the window under the cursor.
+    /// - Returns: The target window
     static func getTargetWindow() -> Window? {
         var result: Window?
 
-        if Defaults[.resizeWindowUnderCursor],
-           let mouseLocation = CGEvent.mouseLocation,
-           let window = WindowEngine.windowAtPosition(mouseLocation) {
-            result = window
+        do {
+            if Defaults[.resizeWindowUnderCursor],
+               let mouseLocation = CGEvent.mouseLocation,
+               let window = try WindowEngine.windowAtPosition(mouseLocation) {
+                result = window
+            }
+        } catch {
+            print("Failed to get window at cursor: \(error.localizedDescription)")
         }
 
         if result == nil {
-           result = WindowEngine.frontmostWindow
+            do {
+                result = try WindowEngine.getFrontmostWindow()
+            } catch {
+                print("Failed to get frontmost window: \(error.localizedDescription)")
+            }
         }
 
         return result
@@ -118,24 +153,24 @@ struct WindowEngine {
 
     /// Get the frontmost Window
     /// - Returns: Window?
-    static var frontmostWindow: Window? {
-        guard
-            let app = NSWorkspace.shared.runningApplications.first(where: { $0.isActive }),
-            let window = Window(pid: app.processIdentifier)
-        else {
+    static func getFrontmostWindow() throws -> Window? {
+        guard let app = NSWorkspace.shared.runningApplications.first(where: { $0.isActive }) else {
             return nil
         }
-        return window
+        return try Window(pid: app.processIdentifier)
     }
 
-    static func windowAtPosition(_ position: CGPoint) -> Window? {
-        if let element = AXUIElement.systemWide.getElementAtPosition(position),
-           let windowElement = element.getValue(.window),
-           // swiftlint:disable:next force_cast
-           let window = Window(element: windowElement as! AXUIElement) {
-            return window
+    /// Get the Window at a given position.
+    /// - Parameter position: The position to check for
+    /// - Returns: The window at the given position, if any
+    static func windowAtPosition(_ position: CGPoint) throws -> Window? {
+        // If we can find the window at a point using the Accessibility API, return it
+        if let element = try AXUIElement.systemWide.getElementAtPosition(position),
+           let windowElement: AXUIElement = try element.getValue(.window) {
+            return try Window(element: windowElement)
         }
 
+        // If the previous method didn't work, loop through all windows on-screen and return the first one that contains the desired point
         let windowList = WindowEngine.windowList
         if let window = (windowList.first { $0.frame.contains(position) }) {
             return window
@@ -144,6 +179,7 @@ struct WindowEngine {
         return nil
     }
 
+    /// Get a list of all windows currently shown, that are likely to be resizable by Loop.
     static var windowList: [Window] {
         guard let list = CGWindowListCopyWindowInfo(
             [.optionOnScreenOnly, .excludeDesktopElements],
@@ -154,8 +190,7 @@ struct WindowEngine {
 
         var windowList: [Window] = []
         for window in list {
-            if let pid = window[kCGWindowOwnerPID as String] as? Int32,
-               let window = Window(pid: pid) {
+            if let pid = window[kCGWindowOwnerPID as String] as? Int32, let window = try? Window(pid: pid) {
                 windowList.append(window)
             }
         }
@@ -163,34 +198,66 @@ struct WindowEngine {
         return windowList
     }
 
+    /// This function is used to calculate the Y offset for a window to be "macOS centered" on the screen
+    /// It is identical to `NSWindow.center()`.
+    /// - Parameters:
+    ///   - windowHeight: Height of the window to be resized
+    ///   - screenHeight: Height of the screen the window will be resized on
+    /// - Returns: The Y offset of the window, to be added onto the screen's midY point.
     static func getMacOSCenterYOffset(_ windowHeight: CGFloat, screenHeight: CGFloat) -> CGFloat {
         let halfScreenHeight = screenHeight / 2
         let windowHeightPercent = windowHeight / screenHeight
         return (0.5 * windowHeightPercent - 0.5) * halfScreenHeight
     }
 
+    /// Determines if a window resize should be animated by Loop or not.
+    /// Note that this does not affect the system window manager.
+    /// - Parameter window: The window to be resized
+    /// - Returns: Whether the window should be animated or not
+    private static func shouldAnimateResize(for window: Window) -> Bool {
+        // If enhancedUI is enabled, then window animations will likely lag a LOT. So, if it's enabled, force-disable animations
+        if window.enhancedUserInterface {
+            return false
+        }
+
+        // If the user has enabled the system window manager, then return the system's animation setting
+        if #available(macOS 15, *), Defaults[.useSystemWindowManagerWhenAvailable] {
+            return SystemWindowManager.MoveAndResize.enableAnimations
+        }
+
+        // If the user has disabled window animations, then return false
+        if !Defaults[.animateWindowResizes] {
+            return false
+        }
+
+        return true
+    }
+
     /// Will move a window back onto the screen. To be run AFTER a window has been resized.
     /// - Parameters:
     ///   - window: Window
     ///   - screenFrame: The screen's frame
-    private static func handleSizeConstrainedWindow(window: Window, screenFrame: CGRect) {
-        let windowFrame = window.frame
-        // If the window is fully shown on the screen
-        if (windowFrame.maxX <= screenFrame.maxX) && (windowFrame.maxY <= screenFrame.maxY) {
+    private static func handleSizeConstrainedWindow(window: Window, bounds: CGRect) {
+        guard bounds != .zero else {
             return
         }
 
-        // If not, then Loop will auto re-adjust the window size to be fully shown on the screen
-        var fixedWindowFrame = windowFrame
+        var windowFrame = window.frame
 
-        if fixedWindowFrame.maxX > screenFrame.maxX {
-            fixedWindowFrame.origin.x = screenFrame.maxX - fixedWindowFrame.width - Defaults[.padding].right
+        // If the window is fully shown on the screen
+        if windowFrame.maxX <= bounds.maxX,
+           windowFrame.maxY <= bounds.maxY {
+            return
         }
 
-        if fixedWindowFrame.maxY > screenFrame.maxY {
-            fixedWindowFrame.origin.y = screenFrame.maxY - fixedWindowFrame.height - Defaults[.padding].bottom
+        if windowFrame.maxX > bounds.maxX {
+            windowFrame.origin.x = bounds.maxX - windowFrame.width
         }
 
-        window.setPosition(fixedWindowFrame.origin)
+        if windowFrame.maxY > bounds.maxY {
+            windowFrame.origin.y = bounds.maxY - windowFrame.height
+        }
+
+        window.position = windowFrame.origin
     }
 }

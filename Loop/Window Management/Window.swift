@@ -5,128 +5,182 @@
 //  Created by Kai Azim on 2023-09-01.
 //
 
-import SwiftUI
 import Defaults
+import SwiftUI
 
 @_silgen_name("_AXUIElementGetWindow") @discardableResult
 func _AXUIElementGetWindow(_ axUiElement: AXUIElement, _ wid: inout CGWindowID) -> AXError
+
+enum WindowError: Error {
+    case invalidWindow
+
+    var localizedDescription: String {
+        switch self {
+        case .invalidWindow:
+            "Invalid window"
+        }
+    }
+}
 
 class Window {
     let axWindow: AXUIElement
     let cgWindowID: CGWindowID
     let nsRunningApplication: NSRunningApplication?
 
-    init?(element: AXUIElement) {
+    var observer: Observer?
+
+    /// Initialize a window from an AXUIElement
+    /// - Parameter element: The AXUIElement to initialize the window with. If it is not a window, an error will be thrown
+    init(element: AXUIElement) throws {
         self.axWindow = element
 
-        var pid = pid_t(0)
-        _ = AXUIElementGetPid(self.axWindow, &pid)
-
-        self.nsRunningApplication = NSWorkspace.shared.runningApplications.first(where: {
+        let pid = try axWindow.getPID()
+        self.nsRunningApplication = NSWorkspace.shared.runningApplications.first {
             $0.processIdentifier == pid
-        })
+        }
 
-        // Set self's CGWindowID
-        var windowId = CGWindowID(0)
-        let result = _AXUIElementGetWindow(self.axWindow, &windowId)
-        guard result == .success else { return nil }
-        self.cgWindowID = windowId
+        self.cgWindowID = try axWindow.getWindowID()
 
         if self.role != .window,
            self.subrole != .standardWindow {
-            print("This is an invalid window")
-            return nil
+            throw WindowError.invalidWindow
         }
 
         // Check if this is a widget
         if let title = nsRunningApplication?.localizedName,
            title == "Notification Center" {
-            print("This window is a part of Notification Center")
+            throw WindowError.invalidWindow
+        }
+    }
+
+    /// Initialize a window from a PID. The frontmost app with the given PID will be used.
+    /// - Parameter pid: The PID of the app to get the window from
+    convenience init(pid: pid_t) throws {
+        let element = AXUIElementCreateApplication(pid)
+        guard let window: AXUIElement = try element.getValue(.focusedWindow) else {
+            throw WindowError.invalidWindow
+        }
+        try self.init(element: window)
+    }
+
+    deinit {
+        if let observer = self.observer {
+            observer.stop()
+        }
+    }
+
+    var role: NSAccessibility.Role? {
+        do {
+            guard let value: String = try self.axWindow.getValue(.role) else {
+                return nil
+            }
+            return NSAccessibility.Role(rawValue: value)
+        } catch {
+            print("Failed to get role: \(error.localizedDescription)")
             return nil
         }
     }
 
-    convenience init?(pid: pid_t) {
-        let element = AXUIElementCreateApplication(pid)
-        guard let window = element.getValue(.focusedWindow) else { return nil }
-        // swiftlint:disable force_cast
-        self.init(element: window as! AXUIElement)
-        // swiftlint:enable force_cast
-    }
-
-    func getPid() -> pid_t? {
-        var pid = pid_t(0)
-        let result = AXUIElementGetPid(self.axWindow, &pid)
-        guard result == .success else { return nil }
-        return pid
-    }
-
-    var role: NSAccessibility.Role? {
-        guard let value = self.axWindow.getValue(.role) as? String else { return nil }
-        return NSAccessibility.Role(rawValue: value)
-    }
-
     var subrole: NSAccessibility.Subrole? {
-        guard let value = self.axWindow.getValue(.subrole) as? String else { return nil }
-        return NSAccessibility.Subrole(rawValue: value)
+        do {
+            guard let value: String = try self.axWindow.getValue(.subrole) else {
+                return nil
+            }
+            return NSAccessibility.Subrole(rawValue: value)
+        } catch {
+            print("Failed to get subrole: \(error.localizedDescription)")
+            return nil
+        }
     }
 
     var title: String? {
-        return self.axWindow.getValue(.title) as? String
+        do {
+            return try self.axWindow.getValue(.title)
+        } catch {
+            print("Failed to get title: \(error.localizedDescription)")
+            return nil
+        }
     }
 
-    var enhancedUserInterface: Bool? {
+    var enhancedUserInterface: Bool {
         get {
-            guard let pid = self.getPid() else { return nil }
-            let appWindow = AXUIElementCreateApplication(pid)
-            return appWindow.getValue(.enhancedUserInterface) as? Bool
+            do {
+                guard let pid = try axWindow.getPID() else {
+                    return false
+                }
+                let appWindow = AXUIElementCreateApplication(pid)
+                let result: Bool? = try appWindow.getValue(.enhancedUserInterface)
+                return result ?? false
+            } catch {
+                print("Failed to get enhancedUserInterface: \(error.localizedDescription)")
+                return false
+            }
         }
         set {
-            guard
-                let newValue = newValue,
-                let pid = self.getPid()
-            else {
-                return
+            do {
+                guard let pid = try axWindow.getPID() else {
+                    return
+                }
+                let appWindow = AXUIElementCreateApplication(pid)
+                try appWindow.setValue(.enhancedUserInterface, value: newValue)
+            } catch {
+                print("Failed to set enhancedUserInterface: \(error.localizedDescription)")
             }
-            let appWindow = AXUIElementCreateApplication(pid)
-            appWindow.setValue(.enhancedUserInterface, value: newValue)
         }
     }
 
+    /// Activate the window. This will bring it to the front and focus it if possible
     func activate() {
-        self.axWindow.setValue(.main, value: true)
-        if let runningApplication = self.nsRunningApplication {
-            runningApplication.activate()
+        do {
+            // First activate the application to ensure proper window management context
+            if let runningApplication = self.nsRunningApplication {
+                runningApplication.activate(options: .activateIgnoringOtherApps)
+            }
+
+            // Then set the window as main after a brief delay to ensure proper ordering
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                try? self.axWindow.setValue(.main, value: true)
+            }
+        } catch {
+            print("Failed to activate window: \(error.localizedDescription)")
         }
     }
 
     var isAppExcluded: Bool {
         if let nsRunningApplication,
-           let bundleId = nsRunningApplication.bundleIdentifier {
-            return Defaults[.applicationExcludeList].contains(bundleId)
+           let path = nsRunningApplication.bundleURL {
+            return Defaults[.excludedApps].contains(path)
         }
         return false
     }
 
-    var isFullscreen: Bool {
-        let result = self.axWindow.getValue(.fullScreen) as? NSNumber
-        return result?.boolValue ?? false
-    }
-    @discardableResult
-    func setFullscreen(_ state: Bool) -> Bool {
-        return self.axWindow.setValue(.fullScreen, value: state)
-    }
-    @discardableResult
-    func toggleFullscreen() -> Bool {
-        if !self.isFullscreen {
-            return self.setFullscreen(true)
+    var fullscreen: Bool {
+        get {
+            do {
+                let result: NSNumber? = try self.axWindow.getValue(.fullScreen)
+                return result?.boolValue ?? false
+            } catch {
+                print("Failed to get fullscreen: \(error.localizedDescription)")
+                return false
+            }
         }
-        return self.setHidden(false)
+        set {
+            do {
+                try self.axWindow.setValue(.fullScreen, value: newValue)
+            } catch {
+                print("Failed to set fullscreen: \(error.localizedDescription)")
+            }
+        }
+    }
+
+    func toggleFullscreen() {
+        fullscreen = !fullscreen
     }
 
     var isHidden: Bool {
-        return self.nsRunningApplication?.isHidden ?? false
+        self.nsRunningApplication?.isHidden ?? false
     }
+
     @discardableResult
     func setHidden(_ state: Bool) -> Bool {
         var result = false
@@ -137,6 +191,7 @@ class Window {
         }
         return result
     }
+
     @discardableResult
     func toggleHidden() -> Bool {
         if !self.isHidden {
@@ -145,59 +200,100 @@ class Window {
         return self.setHidden(false)
     }
 
-    var isMinimized: Bool {
-        let result = self.axWindow.getValue(.minimized) as? NSNumber
-        return result?.boolValue ?? false
-    }
-    @discardableResult
-    func setMinimized(_ state: Bool) -> Bool {
-        return self.axWindow.setValue(.minimized, value: state)
-    }
-    @discardableResult
-    func toggleMinimized() -> Bool {
-        if !self.isMinimized {
-            return self.setMinimized(true)
+    var minimized: Bool {
+        get {
+            do {
+                let result: NSNumber? = try self.axWindow.getValue(.minimized)
+                return result?.boolValue ?? false
+            } catch {
+                print("Failed to get minimized: \(error.localizedDescription)")
+                return false
+            }
         }
-        return self.setMinimized(false)
+        set {
+            do {
+                try self.axWindow.setValue(.minimized, value: newValue)
+            } catch {
+                print("Failed to set minimized: \(error.localizedDescription)")
+            }
+        }
+    }
+
+    func toggleMinimized() {
+        minimized = !minimized
     }
 
     var position: CGPoint {
-        var point: CGPoint = .zero
-        guard let value = self.axWindow.getValue(.position) else { return point }
-        // swiftlint:disable force_cast
-        AXValueGetValue(value as! AXValue, .cgPoint, &point)    // Convert to CGPoint
-        // swiftlint:enable force_cast
-        return point
-    }
-    @discardableResult
-    func setPosition(_ position: CGPoint) -> Bool {
-        return self.axWindow.setValue(.position, value: position)
+        get {
+            do {
+                guard let result: CGPoint = try self.axWindow.getValue(.position) else {
+                    return .zero
+                }
+                return result
+            } catch {
+                print("Failed to get position: \(error.localizedDescription)")
+                return .zero
+            }
+        }
+        set {
+            do {
+                try self.axWindow.setValue(.position, value: newValue)
+            } catch {
+                print("Failed to set position: \(error.localizedDescription)")
+            }
+        }
     }
 
     var size: CGSize {
-        var size: CGSize = .zero
-        guard let value = self.axWindow.getValue(.size) else { return size }
-        // swiftlint:disable force_cast
-        AXValueGetValue(value as! AXValue, .cgSize, &size)      // Convert to CGSize
-        // swiftlint:enable force_cast
-        return size
+        get {
+            do {
+                guard let result: CGSize = try self.axWindow.getValue(.size) else {
+                    return .zero
+                }
+                return result
+            } catch {
+                print("Failed to get size: \(error.localizedDescription)")
+                return .zero
+            }
+        }
+        set {
+            do {
+                try self.axWindow.setValue(.size, value: newValue)
+            } catch {
+                print("Failed to set size: \(error.localizedDescription)")
+            }
+        }
     }
-    @discardableResult
-    func setSize(_ size: CGSize) -> Bool {
-        return self.axWindow.setValue(.size, value: size)
+
+    var isResizable: Bool {
+        do {
+            let result: Bool = try self.axWindow.canSetValue(.size)
+            return result
+        } catch {
+            print("Failed to determine if window size can be set: \(error.localizedDescription)")
+            return true
+        }
     }
 
     var frame: CGRect {
-        return CGRect(origin: self.position, size: self.size)
+        CGRect(origin: self.position, size: self.size)
     }
 
+    /// Set the frame of this Window.
+    /// - Parameters:
+    ///   - rect: The new frame for the window
+    ///   - animate: Whether or not to animate the window resizing
+    ///   - sizeFirst: This will set the size first, which is useful when switching screens. Only does something when window animations are off
+    ///   - bounds: This will prevent the window from going outside the bounds. Only does something when window animations are on
+    ///   - completionHandler: Something to run after the window has been resized. This can include things like moving the cursor to the center of the window
     func setFrame(
         _ rect: CGRect,
         animate: Bool = false,
         sizeFirst: Bool = false,
-        completionHandler: (() -> Void)? = nil
+        bounds: CGRect = .zero,
+        completionHandler: @escaping (() -> ()) = {}
     ) {
-        let enhancedUI = self.enhancedUserInterface ?? false
+        let enhancedUI = self.enhancedUserInterface
 
         if enhancedUI {
             let appName = nsRunningApplication?.localizedName
@@ -206,18 +302,21 @@ class Window {
         }
 
         if animate {
-            let animation = WindowTransformAnimation(rect, window: self, completionHandler: completionHandler)
+            let animation = WindowTransformAnimation(
+                rect,
+                window: self,
+                bounds: bounds,
+                completionHandler: completionHandler
+            )
             animation.startInBackground()
         } else {
             if sizeFirst {
-                self.setSize(rect.size)
+                self.size = rect.size
             }
-            self.setPosition(rect.origin)
-            self.setSize(rect.size)
+            self.position = rect.origin
+            self.size = rect.size
 
-            if let completionHandler = completionHandler {
-                completionHandler()
-            }
+            completionHandler()
         }
 
         if enhancedUI {
@@ -225,53 +324,23 @@ class Window {
         }
     }
 
-    /// MacOS doesn't provide us a way to find the minimum size of a window from the accessibility API.
-    /// So we deliberately force-resize the window to 0x0 and see how small it goes, take note of the frame,
-    /// then we restore the original window size. However, this does have one big consequence. The user
-    /// can see a single frame when the window is being resized to 0x0, then restored. So to counteract this,
-    /// we take a screenshot of the screen, overlay it, and get the minimum size then close the overlay window.
-    /// - Parameters:
-    ///   - screen: The screen the window is on
-    ///   - completion: What to do with the minimum size
-    func getMinSize(screen: NSScreen, completion: @escaping (CGSize) -> Void) {
-        // Take screenshot of screen
-        guard let displayID = screen.displayID else { return }
-        let imageRef = CGDisplayCreateImage(displayID)
-        let image = NSImage(cgImage: imageRef!, size: .zero)
+    public func createObserver(_ callback: @escaping Observer.Callback) -> Observer? {
+        do {
+            return try Observer(processID: self.axWindow.getPID()!, callback: callback)
+        } catch AXError.invalidUIElement {
+            return nil
+        } catch {
+            fatalError("Caught unexpected error creating observer: \(error)")
+        }
+    }
 
-        // Initialize the overlay NSPanel
-        let panel = NSPanel(
-            contentRect: .zero,
-            styleMask: [.borderless, .nonactivatingPanel],
-            backing: .buffered,
-            defer: false
-        )
-        panel.hasShadow = false
-        panel.backgroundColor  = NSColor.white.withAlphaComponent(0.00001)
-        panel.level = .screenSaver
-        panel.ignoresMouseEvents = true
-        panel.setFrame(screen.frame, display: false)
-        panel.contentView = NSImageView(image: image)
-        panel.orderFrontRegardless()
-
-        var minSize: CGSize = .zero
-        DispatchQueue.main.async {
-
-            // Force-resize the window to 0x0
-            let startingSize = self.size
-            self.setSize(CGSize(width: 0, height: 0))
-
-            // Take note of the minimum size
-            minSize = self.size
-
-            // Restore original window size
-            self.setSize(startingSize)
-
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.005) {
-                // Close window, then activate completion handler
-                panel.close()
-                completion(minSize)
-            }
+    public func createObserver(_ callback: @escaping Observer.CallbackWithInfo) -> Observer? {
+        do {
+            return try Observer(processID: self.axWindow.getPID()!, callback: callback)
+        } catch AXError.invalidUIElement {
+            return nil
+        } catch {
+            fatalError("Caught unexpected error creating observer: \(error)")
         }
     }
 }
